@@ -61,4 +61,29 @@ class VPCManager:
         self._save_vpc_config(vpc_name, vpc_config)
         self.logger.info(f"VPC {vpc_name} created successfully")
         return True
-    
+
+    def _load_vpc_config(self, vpc_name):
+        """
+        Loads the VPC config from json file
+        """
+        config_file = self.config_dir/f"{vpc_name}.json"
+        with open(config_file) as f:
+            json.load(f)
+
+    def delete_vpc(self, vpc_name):
+        """
+        Delete a VPC and cleanup all its resources
+        """
+        self.logger.info(f"Deleting VPC: {vpc_name}")
+        if not self._vpc_exists(vpc_name):
+            self.logger.warning(f"VPC {vpc_name} does not exist")
+            return False
+        
+        vpc_config = self._load_vpc_config(vpc_name)
+        bridge_name = vpc_config["bridge"]
+        self.network_utils.delete_bridge(bridge_name)
+
+        config_file = self.config_dir/f"{vpc_name}.json"
+        config_file.unlink()
+        self.logger.info(f"VPC {vpc_name} deleted successfully")
+        return True
