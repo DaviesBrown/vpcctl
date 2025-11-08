@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
 Network utilities - Low level linux networking interface
+This is where we run the ip, iptables and bridge commands
 """
 
 import subprocess
@@ -42,3 +43,6 @@ class NetworkUtils:
         self.logger.info(f"Creating bridge: {bridge_name}")
         self.run_command(f"ip link add {bridge_name} up")
         self.logger.info(f"Bridge {bridge_name} create and activated")
+
+    def create_network(self):
+        """"""
