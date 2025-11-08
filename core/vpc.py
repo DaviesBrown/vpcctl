@@ -35,6 +35,7 @@ class VPCManager:
         Check if a VPC already exists
         """
         config_file = self.config_dir/f"{vpc_name}.json"
+        return config_file.exists()
 
     def create_vpc(self, vpc_name, cidr_block):
         """
