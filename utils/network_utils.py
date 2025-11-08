@@ -67,7 +67,7 @@ class NetworkUtils:
         Delete a network namespace
         """
         self.logger.info(f"Deleting network namespace: {namespace}")
-        self.run_command(f"ip netns delete {namespace}")
+        self.run_command(f"ip netns delete {namespace}", check=False)
         self.logger.info(f"Deleted network namespace: {namespace}")
 
     def run_in_namespace(self, namespace, command):
@@ -77,3 +77,13 @@ class NetworkUtils:
         self.logger.info(f"Running in network namespace: {namespace}")
         full_command = f"ip netns exec {namespace} {command}"
         return self.run_command(full_command)
+
+    def create_veth_pair(self, veth1, veth2):
+        """
+        Create a veth pair to connect namespaces
+        """
+        self.logger.info(f"Creating veth pair: {veth1}, {veth2}")
+        self.run_command(f"ip link add {veth1} type veth peer name {veth2}")
+        self.run_command(f"ip link set {veth1} up")
+        self.run_command(f"ip link set {veth2} up")
+        self.logger.info(f"Created veth pair: {veth1}, {veth2}")
