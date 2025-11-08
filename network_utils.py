@@ -34,3 +34,11 @@ class NetworkUtils:
             self.logger.error(f"Command failed: {command}")
             self.logger.error(f"Error: {e.stderr}")
             raise
+
+    def create_bridge(self, bridge_name):
+        """
+        Create a linux bridge - (Router Implementation)
+        """
+        self.logger.info(f"Creating bridge: {bridge_name}")
+        self.run_command(f"ip link add {bridge_name} up")
+        self.logger.info(f"Bridge {bridge_name} create and activated")
