@@ -62,6 +62,14 @@ class NetworkUtils:
         self.run_command(f"ip netns add {namespace}")
         self.logger.info(f"Created network namespace: {namespace}")
 
+    def delete_network(self, namespace):
+        """
+        Delete a network namespace
+        """
+        self.logger.info(f"Deleting network namespace: {namespace}")
+        self.run_command(f"ip netns delete {namespace}")
+        self.logger.info(f"Deleted network namespace: {namespace}")
+
     def run_in_namespace(self, namespace, command):
         """
         Run a command inside a specific namespace
