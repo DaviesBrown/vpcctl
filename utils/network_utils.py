@@ -54,5 +54,18 @@ class NetworkUtils:
         self.run_command(f"ip link delete {bridge_name}", check=False)
         self.logger.info(f"Bridge {bridge_name} deleted successfully")
 
-    def create_network(self):
-        """"""
+    def create_network(self, namespace):
+        """
+        Create a network namespace - (Subnet Implementation)
+        """
+        self.logger.info(f"Creating network namespace: {namespace}")
+        self.run_command(f"ip netns add {namespace}")
+        self.logger.info(f"Created network namespace: {namespace}")
+
+    def run_in_namespace(self, namespace, command):
+        """
+        Run a command inside a specific namespace
+        """
+        self.logger.info(f"Running in network namespace: {namespace}")
+        full_command = f"ip netns exec {namespace} {command}"
+        return self.run_command(full_command)
