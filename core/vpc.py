@@ -80,6 +80,10 @@ class VPCManager:
             return False
         
         vpc_config = self._load_vpc_config(vpc_name)
+        for subnet in vpc_config["subnets"]:
+            subnet_name = subnet["name"]
+            namespace = f"ns-{vpc_name}-{subnet_name}"
+            self.network_utils.delete_network(namespace)
         bridge_name = vpc_config["bridge"]
         self.network_utils.delete_bridge(bridge_name)
 
