@@ -48,7 +48,7 @@ class VPCManager:
         if self._vpc_exists(vpc_name):
             self.logger.warning(f"VPC {vpc_name} already exists")
             return False
-        
+
         bridge_name = f"br-{vpc_name}"
         self.network_utils.create_bridge(bridge_name=bridge_name)
         vpc_config = {
@@ -68,8 +68,10 @@ class VPCManager:
         Loads the VPC config from json file
         """
         config_file = self.config_dir/f"{vpc_name}.json"
-        with open(config_file) as f:
-            json.load(f)
+        if config_file.exists():
+            with open(config_file) as f:
+                return json.load(f)
+        return None
 
     def delete_vpc(self, vpc_name):
         """
@@ -79,12 +81,20 @@ class VPCManager:
         if not self._vpc_exists(vpc_name):
             self.logger.warning(f"VPC {vpc_name} does not exist")
             return False
-        
+
         vpc_config = self._load_vpc_config(vpc_name)
+
+        if vpc_config.get("nat_enabled"):
+            internet_iface = vpc_config.get("internet_interface")
+            if internet_iface:
+                self.network_utils.cleanup_nat_rules(
+                    vpc_config["bridge"], internet_iface)
+
         for subnet in vpc_config["subnets"]:
             subnet_name = subnet["name"]
             namespace = f"ns-{vpc_name}-{subnet_name}"
             self.network_utils.delete_network(namespace)
+
         bridge_name = vpc_config["bridge"]
         self.network_utils.delete_bridge(bridge_name)
 
@@ -92,3 +102,44 @@ class VPCManager:
         config_file.unlink()
         self.logger.info(f"VPC {vpc_name} deleted successfully")
         return True
+
+    def enable_nat_gateway(self, vpc_name, internet_interface):
+        """
+        Enable NAT gateway for VPC to allow public subnet internet access
+        """
+        self.logger.info(f"Enabling NAT gateway for VPC: {vpc_name}")
+        vpc_config = self._load_vpc_config(vpc_name)
+        if not vpc_config:
+            self.logger.error(f"VPC {vpc_name} does not exist")
+            return False
+
+        bridge_name = vpc_config["bridge"]
+        self.network_utils.setup_nat(bridge_name, internet_interface)
+
+        vpc_config["nat_enabled"] = True
+        vpc_config["internet_interface"] = internet_interface
+        self._save_vpc_config(vpc_name, vpc_config)
+        self.logger.info(f"NAT gateway enabled for VPC {vpc_name}")
+        return True
+
+    def list_vpcs(self):
+        """
+        List all VPCs
+        """
+        vpcs = []
+        for config_file in self.config_dir.glob("*.json"):
+            with open(config_file) as f:
+                vpc_config = json.load(f)
+                vpcs.append({
+                    "name": vpc_config["name"],
+                    "cidr": vpc_config["cidr"],
+                    "subnets": len(vpc_config.get("subnets", [])),
+                    "nat_enabled": vpc_config.get("nat_enabled", False)
+                })
+        return vpcs
+
+    def get_vpc_details(self, vpc_name):
+        """
+        Get detailed info about a VPC
+        """
+        return self._load_vpc_config(vpc_name)
