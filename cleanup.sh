@@ -5,16 +5,33 @@ echo "VPC CLI - Cleanup Script"
 echo "========================================="
 echo ""
 
-echo "Deleting VPC peering..."
-sudo python3 vpcctl.py delete-peering vpc-test vpc-test2 2>/dev/null || echo "No peering to delete"
+echo "Cleaning up all VPC peering connections..."
+if [ -d "/tmp/vpc_peering" ]; then
+    for peering_file in /tmp/vpc_peering/*.json; do
+        if [ -f "$peering_file" ]; then
+            # Extract VPC names from filename (format: vpc1-vpc2.json)
+            basename=$(basename "$peering_file" .json)
+            vpc1=$(echo "$basename" | cut -d'-' -f1)
+            vpc2=$(echo "$basename" | cut -d'-' -f2-)
+            echo "Deleting peering: $vpc1 <-> $vpc2"
+            sudo python3 vpcctl.py delete-peering "$vpc1" "$vpc2" 2>/dev/null || true
+        fi
+    done
+else
+    echo "No peering directory found"
+fi
 
 echo ""
-echo "Deleting VPC 'vpc-test'..."
+echo "Deleting test VPCs..."
 sudo python3 vpcctl.py delete-vpc vpc-test 2>/dev/null || echo "VPC vpc-test not found"
 
 echo ""
 echo "Deleting VPC 'vpc-test2'..."
 sudo python3 vpcctl.py delete-vpc vpc-test2 2>/dev/null || echo "VPC vpc-test2 not found"
+
+echo ""
+echo "Deleting demo VPC..."
+sudo python3 vpcctl.py delete-vpc demo-vpc 2>/dev/null || echo "VPC demo-vpc not found"
 
 echo ""
 echo "Cleaning up config directories..."
