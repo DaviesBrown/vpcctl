@@ -138,18 +138,16 @@ sudo ./tests/demo.sh
 
 ## Application Deployment Demo
 
-Deploy a complete 3-tier application (web, app, database):
+Deploy a web server in a VPC:
 ```bash
 sudo ./tests/demo_app.sh
 ```
 
 This demonstrates:
-- Web server in public subnet (port 80)
-- Application server in private subnet (port 8080)
-- Database server in isolated subnet (port 5432)
-- Tier-to-tier connectivity (web → app → db)
-- Internet access for public tier
-- Security isolation between tiers
+- Web server deployment (Python HTTP server on port 8080)
+- Ping and curl tests to verify the server
+- Internet access via NAT gateway
+- Complete VPC networking setup
 
 ## Complete Test Suite
 
@@ -191,7 +189,7 @@ vpc-cli/
 ├── tests/
 │   ├── test_vpc.sh       # Comprehensive tests
 │   ├── demo.sh           # Quick demo
-│   ├── demo_app.sh       # 3-tier app deployment demo
+│   ├── demo_app.sh       # Web server deployment demo
 │   └── check_requirements.py
 ├── config/
 │   └── firewall_rules.json
