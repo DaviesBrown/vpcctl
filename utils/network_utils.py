@@ -73,10 +73,35 @@ class NetworkUtils:
     def run_in_namespace(self, namespace, command):
         """
         Run a command inside a specific namespace
+        Commands with shell features (pipes, redirects, &&, etc.) need shell=True
         """
         self.logger.info(f"Running in network namespace: {namespace}")
-        full_command = f"ip netns exec {namespace} {command}"
-        return self.run_command(full_command)
+
+        # Check if command has shell features that require sh -c
+        shell_features = ['&&', '||', '|', '>',
+                          '<', '&', ';', 'nohup', '$(', '`']
+        needs_shell = any(feature in command for feature in shell_features)
+
+        try:
+            if needs_shell:
+                # For complex commands, use sh -c through ip netns exec
+                full_command = ['ip', 'netns', 'exec',
+                                namespace, 'sh', '-c', command]
+                result = subprocess.run(
+                    full_command,
+                    check=True,
+                    capture_output=True,
+                    text=True
+                )
+                return result.stdout
+            else:
+                # For simple commands, use the regular method
+                full_command = f"ip netns exec {namespace} {command}"
+                return self.run_command(full_command)
+        except subprocess.CalledProcessError as e:
+            self.logger.error(f"Command failed: {command}")
+            self.logger.error(f"Error: {e.stderr}")
+            raise
 
     def create_veth_pair(self, veth1, veth2):
         """

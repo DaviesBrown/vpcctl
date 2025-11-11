@@ -50,7 +50,15 @@ done
 
 echo ""
 echo "Cleaning up orphaned veth interfaces..."
-for iface in $(ip link show | grep -E "peer-vpc-|veth-|v-|vb-" | awk -F: '{print $2}' | awk '{print $1}'); do
+# Clean up peering veth pairs first
+for iface in $(ip link show | grep -oE "peer-[^:@]+" | sort -u); do
+    echo "Deleting peering interface: $iface"
+    sudo ip link delete "$iface" 2>/dev/null || true
+done
+
+# Clean up other veth interfaces
+for iface in $(ip link show | grep -oE "(veth-|v-|vb-|ve)[^:@]+" | awk '{print $1}' | sort -u); do
+    echo "Deleting veth interface: $iface"
     sudo ip link delete "$iface" 2>/dev/null || true
 done
 
