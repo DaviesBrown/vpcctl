@@ -70,7 +70,7 @@ class NetworkUtils:
         self.run_command(f"ip netns delete {namespace}", check=False)
         self.logger.info(f"Deleted network namespace: {namespace}")
 
-    def run_in_namespace(self, namespace, command):
+    def run_in_namespace(self, namespace, command, check=True):
         """
         Run a command inside a specific namespace
         Commands with shell features (pipes, redirects, &&, etc.) need shell=True
@@ -89,7 +89,7 @@ class NetworkUtils:
                                 namespace, 'sh', '-c', command]
                 result = subprocess.run(
                     full_command,
-                    check=True,
+                    check=check,
                     capture_output=True,
                     text=True
                 )
@@ -97,7 +97,7 @@ class NetworkUtils:
             else:
                 # For simple commands, use the regular method
                 full_command = f"ip netns exec {namespace} {command}"
-                return self.run_command(full_command)
+                return self.run_command(full_command, check=check)
         except subprocess.CalledProcessError as e:
             self.logger.error(f"Command failed: {command}")
             self.logger.error(f"Error: {e.stderr}")
@@ -108,6 +108,20 @@ class NetworkUtils:
         Create a veth pair to connect namespaces
         """
         self.logger.info(f"Creating veth pair: {veth1}, {veth2}")
+
+        # Check if veth pair already exists
+        try:
+            self.run_command(f"ip link show {veth1}", check=True)
+            self.logger.warning(
+                f"Veth pair {veth1} already exists, reusing it")
+            # Make sure both ends are up
+            self.run_command(f"ip link set {veth1} up", check=False)
+            self.run_command(f"ip link set {veth2} up", check=False)
+            return
+        except:
+            # Veth doesn't exist, create it
+            pass
+
         self.run_command(f"ip link add {veth1} type veth peer name {veth2}")
         self.run_command(f"ip link set {veth1} up")
         self.run_command(f"ip link set {veth2} up")
@@ -140,9 +154,12 @@ class NetworkUtils:
     def set_bridge_ip(self, bridge_name, ip_address):
         """
         Set IP address on bridge
+        Bridges can have multiple IPs (one per subnet), so we use 'ip addr add'
         """
         self.logger.info(f"Setting IP {ip_address} on bridge {bridge_name}")
-        self.run_command(f"ip addr add {ip_address} dev {bridge_name}")
+        # Use check=False to avoid errors if IP already exists
+        self.run_command(
+            f"ip addr add {ip_address} dev {bridge_name}", check=False)
 
     def add_default_route(self, namespace, gateway_ip):
         """
@@ -150,6 +167,9 @@ class NetworkUtils:
         """
         self.logger.info(
             f"Adding default route via {gateway_ip} in {namespace}")
+        # First try to delete existing default route (if any)
+        self.run_in_namespace(
+            namespace, f"ip route del default", check=False)
         self.run_in_namespace(
             namespace, f"ip route add default via {gateway_ip}")
 
@@ -160,19 +180,29 @@ class NetworkUtils:
         self.logger.info("Enabling IP forwarding")
         self.run_command("sysctl -w net.ipv4.ip_forward=1")
 
-    def setup_nat(self, bridge_name, internet_interface):
+    def setup_nat(self, bridge_name, internet_interface, public_subnet_cidrs):
         """
-        Setup NAT for outbound traffic from bridge
+        Setup NAT for outbound traffic from specific public subnets only
+        Private subnets will not have internet access
         """
         self.logger.info(
-            f"Setting up NAT from {bridge_name} to {internet_interface}")
+            f"Setting up NAT for public subnets to {internet_interface}")
         self.enable_ip_forwarding()
-        self.run_command(
-            f"iptables -t nat -A POSTROUTING -o {internet_interface} -j MASQUERADE"
-        )
-        self.run_command(
-            f"iptables -A FORWARD -i {bridge_name} -o {internet_interface} -j ACCEPT"
-        )
+
+        # Setup NAT rules for each public subnet CIDR
+        for cidr in public_subnet_cidrs:
+            self.logger.info(f"Setting up NAT for public subnet {cidr}")
+            # NAT only traffic from this specific public subnet
+            self.run_command(
+                f"iptables -t nat -A POSTROUTING -s {cidr} -o {internet_interface} -j MASQUERADE"
+            )
+            # Allow forwarding only from this specific public subnet
+            self.run_command(
+                f"iptables -A FORWARD -i {bridge_name} -s {cidr} -o {internet_interface} -j ACCEPT"
+            )
+
+        # Allow ALL return traffic from internet to bridge (for established connections)
+        # This is safe because it only allows RELATED,ESTABLISHED traffic
         self.run_command(
             f"iptables -A FORWARD -i {internet_interface} -o {bridge_name} -m state --state RELATED,ESTABLISHED -j ACCEPT"
         )
@@ -209,20 +239,23 @@ class NetworkUtils:
         self.logger.info(f"Applying firewall rule in {namespace}: {rule_cmd}")
         self.run_in_namespace(namespace, rule_cmd)
 
-    def cleanup_nat_rules(self, bridge_name, internet_interface):
+    def cleanup_nat_rules(self, bridge_name, internet_interface, public_subnet_cidrs):
         """
-        Cleanup NAT rules
+        Cleanup NAT rules for public subnets
         """
         self.logger.info(f"Cleaning up NAT rules for {bridge_name}")
-        self.run_command(
-            f"iptables -t nat -D POSTROUTING -o {internet_interface} -j MASQUERADE",
-            check=False
-        )
-        self.run_command(
-            f"iptables -D FORWARD -i {bridge_name} -o {internet_interface} -j ACCEPT",
-            check=False
-        )
-        self.run_command(
-            f"iptables -D FORWARD -i {internet_interface} -o {bridge_name} -m state --state RELATED,ESTABLISHED -j ACCEPT",
-            check=False
-        )
+
+        # Clean up rules for each public subnet
+        for cidr in public_subnet_cidrs:
+            self.run_command(
+                f"iptables -t nat -D POSTROUTING -s {cidr} -o {internet_interface} -j MASQUERADE",
+                check=False
+            )
+            self.run_command(
+                f"iptables -D FORWARD -s {cidr} -i {bridge_name} -o {internet_interface} -j ACCEPT",
+                check=False
+            )
+            self.run_command(
+                f"iptables -D FORWARD -d {cidr} -i {internet_interface} -o {bridge_name} -m state --state RELATED,ESTABLISHED -j ACCEPT",
+                check=False
+            )
