@@ -69,7 +69,8 @@ class SubnetManager:
         self.network_utils.set_bridge_ip(
             vpc_config["bridge"], f"{gateway_ip}/{subnet_cidr.split('/')[1]}")
 
-        self.network_utils.enable_ip_forwarding()
+        # IP forwarding is now handled at VPC level when NAT is enabled
+        # self.network_utils.enable_ip_forwarding()  # REMOVE THIS LINE
 
         self.network_utils.add_default_route(namespace, gateway_ip)
         self.network_utils.run_in_namespace(namespace, "ip link set lo up")
