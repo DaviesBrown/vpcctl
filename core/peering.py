@@ -33,6 +33,38 @@ class PeeringManager:
         return (self.peering_dir/f"{peering_id1}.json").exists() or \
                (self.peering_dir/f"{peering_id2}.json").exists()
 
+    def _remove_isolation_between_vpcs(self, bridge1, bridge2):
+        """
+        Remove iptables isolation rules between two VPC bridges to allow peering
+        """
+        # Remove DROP rules in both directions
+        self.network_utils.run_command(
+            f"iptables -D FORWARD -i {bridge1} -o {bridge2} -j DROP",
+            check=False
+        )
+        self.network_utils.run_command(
+            f"iptables -D FORWARD -i {bridge2} -o {bridge1} -j DROP",
+            check=False
+        )
+        self.logger.info(
+            f"Removed isolation rules between {bridge1} and {bridge2} for peering")
+
+    def _add_isolation_between_vpcs(self, bridge1, bridge2):
+        """
+        Add iptables isolation rules between two VPC bridges when peering is deleted
+        """
+        # Add DROP rules in both directions
+        self.network_utils.run_command(
+            f"iptables -I FORWARD -i {bridge1} -o {bridge2} -j DROP",
+            check=False
+        )
+        self.network_utils.run_command(
+            f"iptables -I FORWARD -i {bridge2} -o {bridge1} -j DROP",
+            check=False
+        )
+        self.logger.info(
+            f"Re-added isolation rules between {bridge1} and {bridge2}")
+
     def create_peering(self, vpc1_name, vpc2_name):
         self.logger.info(
             f"Creating peering between {vpc1_name} and {vpc2_name}")
@@ -51,6 +83,11 @@ class PeeringManager:
 
         veth1 = f"peer-{vpc1_name}"
         veth2 = f"peer-{vpc2_name}"
+
+        # Remove isolation rules between these VPCs to allow peering
+        bridge1 = vpc1_config["bridge"]
+        bridge2 = vpc2_config["bridge"]
+        self._remove_isolation_between_vpcs(bridge1, bridge2)
 
         self.network_utils.create_veth_pair(veth1, veth2)
         self.network_utils.attach_to_bridge(vpc1_config["bridge"], veth1)
@@ -109,6 +146,16 @@ class PeeringManager:
         if not config_file:
             self.logger.warning("Peering does not exist")
             return False
+
+        # Get VPC configs to restore isolation
+        vpc1_config = self._get_vpc_config(vpc1_name)
+        vpc2_config = self._get_vpc_config(vpc2_name)
+
+        if vpc1_config and vpc2_config:
+            bridge1 = vpc1_config["bridge"]
+            bridge2 = vpc2_config["bridge"]
+            # Restore isolation between the VPCs
+            self._add_isolation_between_vpcs(bridge1, bridge2)
 
         config_file.unlink()
         self.logger.info(
