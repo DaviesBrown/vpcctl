@@ -37,6 +37,54 @@ class VPCManager:
         config_file = self.config_dir/f"{vpc_name}.json"
         return config_file.exists()
 
+    def _add_vpc_isolation_rules(self, bridge_name):
+        """
+        Add iptables rules to isolate this VPC from other VPC bridges
+        Block forwarding between different VPC bridges by default
+        """
+        # Get list of existing VPC bridges to block traffic to/from them
+        existing_vpcs = self.list_vpcs()
+
+        for vpc in existing_vpcs:
+            other_bridge = vpc.get("bridge", f"br-{vpc['name']}")
+            if other_bridge != bridge_name:
+                # Block forwarding from this VPC to other VPCs
+                self.network_utils.run_command(
+                    f"iptables -I FORWARD -i {bridge_name} -o {other_bridge} -j DROP",
+                    check=False
+                )
+                # Block forwarding from other VPCs to this VPC
+                self.network_utils.run_command(
+                    f"iptables -I FORWARD -i {other_bridge} -o {bridge_name} -j DROP",
+                    check=False
+                )
+                self.logger.info(
+                    f"Added isolation rules between {bridge_name} and {other_bridge}")
+
+    def _remove_vpc_isolation_rules(self, bridge_name):
+        """
+        Remove iptables isolation rules for this VPC
+        """
+        # Remove rules blocking this bridge from/to other VPC bridges
+        # We use -D to delete rules, with check=False to ignore if rule doesn't exist
+        existing_vpcs = self.list_vpcs()
+
+        for vpc in existing_vpcs:
+            other_bridge = vpc.get("bridge", f"br-{vpc['name']}")
+            if other_bridge != bridge_name:
+                # Remove block from this VPC to other VPCs
+                self.network_utils.run_command(
+                    f"iptables -D FORWARD -i {bridge_name} -o {other_bridge} -j DROP",
+                    check=False
+                )
+                # Remove block from other VPCs to this VPC
+                self.network_utils.run_command(
+                    f"iptables -D FORWARD -i {other_bridge} -o {bridge_name} -j DROP",
+                    check=False
+                )
+                self.logger.debug(
+                    f"Removed isolation rules between {bridge_name} and {other_bridge}")
+
     def create_vpc(self, vpc_name, cidr_block):
         """
         Create an new VPC with a bridge as the central router
@@ -51,6 +99,12 @@ class VPCManager:
 
         bridge_name = f"br-{vpc_name}"
         self.network_utils.create_bridge(bridge_name=bridge_name)
+
+        # Add isolation rules: block forwarding between this VPC and other VPCs
+        # This ensures VPC isolation - traffic can only flow within the VPC
+        # unless explicitly enabled via peering
+        self._add_vpc_isolation_rules(bridge_name)
+
         vpc_config = {
             "name": vpc_name,
             "cidr": cidr_block,
@@ -83,12 +137,17 @@ class VPCManager:
             return False
 
         vpc_config = self._load_vpc_config(vpc_name)
+        bridge_name = vpc_config["bridge"]
+
+        # Remove isolation rules for this VPC
+        self._remove_vpc_isolation_rules(bridge_name)
 
         if vpc_config.get("nat_enabled"):
             internet_iface = vpc_config.get("internet_interface")
-            if internet_iface:
+            public_subnet_cidrs = vpc_config.get("public_subnet_cidrs", [])
+            if internet_iface and public_subnet_cidrs:
                 self.network_utils.cleanup_nat_rules(
-                    vpc_config["bridge"], internet_iface)
+                    vpc_config["bridge"], internet_iface, public_subnet_cidrs)
 
         for subnet in vpc_config["subnets"]:
             subnet_name = subnet["name"]
@@ -114,10 +173,27 @@ class VPCManager:
             return False
 
         bridge_name = vpc_config["bridge"]
-        self.network_utils.setup_nat(bridge_name, internet_interface)
+        self.network_utils.enable_ip_forwarding()
+
+        public_subnets = [s for s in vpc_config.get(
+            "subnets", []) if s.get("type") == "public"]
+        if not public_subnets:
+            self.logger.warning(f"No public subnets found in VPC {vpc_name}")
+            return False
+
+        # Extract CIDRs of public subnets
+        public_subnet_cidrs = [s["cidr"] for s in public_subnets]
+
+        # Setup NAT only for public subnets
+        self.network_utils.setup_nat(
+            bridge_name, internet_interface, public_subnet_cidrs)
+        self.logger.info(
+            f"NAT enabled for public subnets: {', '.join(public_subnet_cidrs)}")
 
         vpc_config["nat_enabled"] = True
         vpc_config["internet_interface"] = internet_interface
+        # Save for cleanup
+        vpc_config["public_subnet_cidrs"] = public_subnet_cidrs
         self._save_vpc_config(vpc_name, vpc_config)
         self.logger.info(f"NAT gateway enabled for VPC {vpc_name}")
         return True
